@@ -1,8 +1,13 @@
-package app_monitoring
+package prometheus
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/piyushkumar96/app-monitoring/interfaces"
+	"github.com/piyushkumar96/app-monitoring/models"
 
-// NewAppMetrics creates and registers application-level Prometheus metrics.
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// NewPromAppMetrics creates and registers Prometheus application-level metrics.
 // It initializes an ApplicationErrorsCounter gauge for tracking application errors by error code.
 //
 // The ApplicationErrorsCounter metric tracks the count of errors at the application level,
@@ -12,36 +17,20 @@ import "github.com/prometheus/client_golang/prometheus"
 //   - meta: Configuration containing the namespace and metric settings.
 //     Set ApplicationErrorsCounter to nil to disable error tracking.
 //
-// Returns an AppMetricsInterface instance that can be used to log and query error metrics.
-//
-// Example:
-//
-//	appMetrics := monitoring.NewAppMetrics(&monitoring.AppMetricsMeta{
-//	    Namespace: "myapp",
-//	    ApplicationErrorsCounter: &monitoring.MetricMeta{
-//	        Labels: []string{"error_code"},
-//	    },
-//	})
-func NewAppMetrics(meta *AppMetricsMeta) AppMetricsInterface {
+// Returns an interfaces.AppMetricsInterface instance that can be used to log and query error metrics.
+func NewPromAppMetrics(meta *models.AppMetricsMeta) interfaces.AppMetricsInterface {
 	var appErrorsCounter *prometheus.GaugeVec
 	if meta.ApplicationErrorsCounter != nil {
-		appErrorsCounter = GetGaugeVec(meta.Namespace, "application_errors_total", "Tracks the counts of app errors at application level", meta.ApplicationErrorsCounter.Labels)
+		appErrorsCounter = GetPromGaugeVec(meta.Namespace, "application_errors_total", "Tracks the counts of app errors at application level", meta.ApplicationErrorsCounter.Labels)
 	}
-	return &AppMetrics{
+	return &PromAppMetrics{
 		applicationErrorsCounter: appErrorsCounter,
 	}
 }
 
 // LogMetrics increments the application error counter for each provided error code.
 // Call this method when application errors occur to track them in Prometheus.
-//
-// Parameters:
-//   - errCodes: Slice of error codes to increment counters for.
-//
-// Example:
-//
-//	appMetrics.LogMetrics([]string{"ERR_DB_CONNECTION", "ERR_VALIDATION"})
-func (cm *AppMetrics) LogMetrics(errCodes []string) {
+func (cm *PromAppMetrics) LogMetrics(errCodes []string) {
 	if cm.applicationErrorsCounter != nil {
 		for _, errCode := range errCodes {
 			cm.applicationErrorsCounter.WithLabelValues(errCode).Inc()
@@ -52,21 +41,12 @@ func (cm *AppMetrics) LogMetrics(errCodes []string) {
 // GetApplicationErrorsCounterMetric returns the underlying Prometheus GaugeVec
 // for the application errors counter. This can be used for advanced operations
 // like resetting metrics or custom queries.
-//
-// Returns nil if the metric was not configured during initialization.
-func (cm *AppMetrics) GetApplicationErrorsCounterMetric() *prometheus.GaugeVec {
+func (cm *PromAppMetrics) GetApplicationErrorsCounterMetric() *prometheus.GaugeVec {
 	return cm.applicationErrorsCounter
 }
 
 // DecrementAppErrorCount decrements the application error counter for a specific error code.
 // Use this when an error condition has been resolved or corrected.
-//
-// Parameters:
-//   - errCode: The error code to decrement the counter for.
-//
-// Example:
-//
-//	appMetrics.DecrementAppErrorCount("ERR_DB_CONNECTION")
-func (cm *AppMetrics) DecrementAppErrorCount(errCode string) {
+func (cm *PromAppMetrics) DecrementAppErrorCount(errCode string) {
 	cm.applicationErrorsCounter.WithLabelValues(errCode).Dec()
 }

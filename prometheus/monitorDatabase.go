@@ -1,13 +1,17 @@
-package app_monitoring
+package prometheus
 
 import (
 	"time"
+
+	"github.com/piyushkumar96/app-monitoring/constants"
+	"github.com/piyushkumar96/app-monitoring/interfaces"
+	"github.com/piyushkumar96/app-monitoring/models"
 
 	ae "github.com/piyushkumar96/app-error"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// NewDatabaseMetrics creates and registers database operation Prometheus metrics.
+// NewPromDatabaseMetrics creates and registers Prometheus database operation metrics.
 // It initializes counters for operation counts and histograms for operation latencies.
 //
 // The metrics track:
@@ -18,32 +22,32 @@ import (
 //   - meta: Configuration containing the namespace and metric settings.
 //     Set individual metric configs to nil to disable them.
 //
-// Returns a DBMetricsInterface instance that can be used to log database operation metrics.
+// Returns an interfaces.DBMetricsInterface instance that can be used to log database operation metrics.
 //
 // Example:
 //
-//	dbMetrics := monitoring.NewDatabaseMetrics(&monitoring.DBMetricsMeta{
+//	dbMetrics := prometheus.NewPromDatabaseMetrics(&models.DBMetricsMeta{
 //	    Namespace: "myapp",
-//	    OperationsTotal: &monitoring.MetricMeta{
+//	    OperationsTotal: &models.MetricMeta{
 //	        Labels: []string{"op_type", "source", "entity", "is_txn", "status"},
 //	    },
-//	    OperationsLatencyMillis: &monitoring.MetricMeta{
+//	    OperationsLatencyMillis: &models.MetricMeta{
 //	        Labels:  []string{"op_type", "source", "entity", "is_txn"},
-//	        Buckets: monitoring.GetExponentialBuckets(1, 2, 12),
+//	        Buckets: prometheus.GetPromExponentialBuckets(1, 2, 12),
 //	    },
 //	})
-func NewDatabaseMetrics(meta *DBMetricsMeta) DBMetricsInterface {
+func NewPromDatabaseMetrics(meta *models.DBMetricsMeta) interfaces.DBMetricsInterface {
 	var operationsTotal *prometheus.CounterVec
 	var operationsLatencyMillis *prometheus.HistogramVec
 
 	if meta.OperationsTotal != nil {
-		operationsTotal = GetCounterVec(meta.Namespace, "db_operations", "Number of times DB operations executed for total/success/failure", meta.OperationsTotal.Labels)
+		operationsTotal = GetPromCounterVec(meta.Namespace, "db_operations", "Number of times DB operations executed for total/success/failure", meta.OperationsTotal.Labels)
 	}
 	if meta.OperationsLatencyMillis != nil {
-		operationsLatencyMillis = GetHistogramVec(meta.Namespace, "db_operations_latency_millis", "Tracks the latencies for HTTP requests at spring serve level", meta.OperationsLatencyMillis.Labels, meta.OperationsLatencyMillis.Buckets)
+		operationsLatencyMillis = GetPromHistogramVec(meta.Namespace, "db_operations_latency_millis", "Tracks the latencies for database operations", meta.OperationsLatencyMillis.Labels, meta.OperationsLatencyMillis.Buckets)
 	}
 
-	return &DBMetrics{
+	return &PromDBMetrics{
 		operationsTotal:         operationsTotal,
 		operationsLatencyMillis: operationsLatencyMillis,
 	}
@@ -56,20 +60,9 @@ func NewDatabaseMetrics(meta *DBMetricsMeta) DBMetricsInterface {
 //   - dbMetricsLabelValues: Label values containing operation details (type, source, entity, transaction flag).
 //
 // Returns the start time to be passed to LogMetricsPost for latency calculation.
-//
-// Example:
-//
-//	startTime := dbMetrics.LogMetricsPre(&monitoring.DBMetricsLabelValues{
-//	    OpType:   "select",
-//	    Source:   "UserRepository",
-//	    AdEntity: "users",
-//	    IsTxn:    "false",
-//	})
-//	// ... execute database operation ...
-//	dbMetrics.LogMetricsPost(err, labelValues, startTime)
-func (dm *DBMetrics) LogMetricsPre(dbMetricsLabelValues *DBMetricsLabelValues) time.Time {
+func (dm *PromDBMetrics) LogMetricsPre(dbMetricsLabelValues *models.DBMetricsLabelValues) time.Time {
 	if dm.operationsTotal != nil {
-		dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), string(dbMetricsLabelValues.AdEntity), dbMetricsLabelValues.IsTxn, Total).Inc()
+		dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), string(dbMetricsLabelValues.AdEntity), dbMetricsLabelValues.IsTxn, constants.Total).Inc()
 	}
 	return time.Now()
 }
@@ -81,17 +74,12 @@ func (dm *DBMetrics) LogMetricsPre(dbMetricsLabelValues *DBMetricsLabelValues) t
 //   - appErr: The error returned by the operation (nil for success, non-nil for failure).
 //   - dbMetricsLabelValues: Label values containing operation details.
 //   - opsExecTime: The start time returned by LogMetricsPre.
-//
-// Example:
-//
-//	dbMetrics.LogMetricsPost(nil, labelValues, startTime) // Success
-//	dbMetrics.LogMetricsPost(err, labelValues, startTime) // Failure
-func (dm *DBMetrics) LogMetricsPost(appErr *ae.AppError, dbMetricsLabelValues *DBMetricsLabelValues, opsExecTime time.Time) {
+func (dm *PromDBMetrics) LogMetricsPost(appErr *ae.AppError, dbMetricsLabelValues *models.DBMetricsLabelValues, opsExecTime time.Time) {
 	if dm.operationsTotal != nil {
 		if appErr != nil {
-			dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), dbMetricsLabelValues.AdEntity, dbMetricsLabelValues.IsTxn, Failure).Inc()
+			dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), dbMetricsLabelValues.AdEntity, dbMetricsLabelValues.IsTxn, constants.Failure).Inc()
 		} else {
-			dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), dbMetricsLabelValues.AdEntity, dbMetricsLabelValues.IsTxn, Success).Inc()
+			dm.operationsTotal.WithLabelValues(string(dbMetricsLabelValues.OpType), string(dbMetricsLabelValues.Source), dbMetricsLabelValues.AdEntity, dbMetricsLabelValues.IsTxn, constants.Success).Inc()
 		}
 	}
 	if dm.operationsLatencyMillis != nil {
@@ -103,7 +91,7 @@ func (dm *DBMetrics) LogMetricsPost(appErr *ae.AppError, dbMetricsLabelValues *D
 // for the database operations counter. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (dm *DBMetrics) GetOperationsTotalMetric() *prometheus.CounterVec {
+func (dm *PromDBMetrics) GetOperationsTotalMetric() *prometheus.CounterVec {
 	return dm.operationsTotal
 }
 
@@ -111,6 +99,6 @@ func (dm *DBMetrics) GetOperationsTotalMetric() *prometheus.CounterVec {
 // for the database operation latency. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (dm *DBMetrics) GetOperationsLatencyMillisMetric() *prometheus.HistogramVec {
+func (dm *PromDBMetrics) GetOperationsLatencyMillisMetric() *prometheus.HistogramVec {
 	return dm.operationsLatencyMillis
 }

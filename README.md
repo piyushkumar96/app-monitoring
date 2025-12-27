@@ -1,10 +1,10 @@
-# Monitoring
+# App Monitoring
 
-A Go package for capturing Prometheus metrics to monitor application state. These metrics can be visualized in Grafana dashboards for comprehensive application observability.
+A Go package for capturing application metrics with pluggable backends. Currently supports Prometheus, with an extensible architecture for adding other backends (OpenTelemetry, StatsD, etc.) in the future.
 
 ## Features
 
-This package provides easy-to-use abstractions for common Prometheus metric types:
+This package provides easy-to-use abstractions for common metric types:
 
 | Metric Type | Description | Use Case |
 |-------------|-------------|----------|
@@ -15,66 +15,64 @@ This package provides easy-to-use abstractions for common Prometheus metric type
 | **Cron Job** | Scheduled job metrics | Track job executions and durations |
 | **Application** | Error tracking | Count application-level errors by error code |
 
-## Supported Metrics
-
-### Router Metrics
-- `http_requests` - Counter for HTTP requests (total/success/failure)
-- `http_request_latency_millis` - Histogram for request latencies
-- `http_request_size_bytes` - Histogram for request body sizes
-- `http_response_size_bytes` - Histogram for response body sizes
-
-### Database Metrics
-- `db_operations` - Counter for DB operations (total/success/failure)
-- `db_operations_latency_millis` - Histogram for operation latencies
-
-### Downstream Service Metrics
-- `downstream_service_http_requests` - Counter for downstream HTTP requests
-- `downstream_service_http_request_latency_millis` - Histogram for request latencies
-- `downstream_service_http_request_size_bytes` - Histogram for request sizes
-- `downstream_service_http_response_size_bytes` - Histogram for response sizes
-
-### Pub/Sub Metrics
-- `pubsub_messages_consumed` - Counter for consumed messages
-- `pubsub_messages_published` - Counter for published messages
-- `pubsub_messages_published_latency_millis` - Histogram for publish latencies
-- `pubsub_messages_published_size_bytes` - Histogram for message sizes
-
-### Cron Job Metrics
-- `cron_job_execution_count` - Counter for job executions (total/success/failure)
-- `cron_job_execution_latency_millis` - Histogram for job durations
-
-### Application Metrics
-- `application_errors_total` - Gauge for application errors by error code
-
 ## Installation
 
 ```bash
 go get github.com/piyushkumar96/app-monitoring@latest
 ```
 
+## Project Structure
+
+```
+app-monitoring/
+├── constants/            # Shared constants package
+│   └── constants.go      # Total, Success, Failure, HTTP status constants
+├── interfaces/           # Generic interfaces package
+│   ├── interfaces.go     # Interface definitions for all metric types
+│   └── mock.go           # Mock implementations for testing
+├── models/               # Shared data models package
+│   └── model.go          # Configuration types and label value types
+├── prometheus/           # Prometheus-specific implementation
+│   ├── metric.go
+│   ├── model.go
+│   ├── monitorApp.go
+│   ├── monitorCronJob.go
+│   ├── monitorDatabase.go
+│   ├── monitorDownstreamService.go
+│   ├── monitorPubSub.go
+│   ├── monitorRouter.go
+│   └── noop.go           # NoOp implementations for testing
+├── examples/
+│   └── example.go
+├── go.mod
+└── README.md
+```
+
 ## Quick Start
 
-### 1. Initialize Metrics
+### 1. Initialize Prometheus Metrics
 
 ```go
 package main
 
 import (
-    monitoring "github.com/piyushkumar96/app-monitoring"
+    "github.com/piyushkumar96/app-monitoring/interfaces"
+    "github.com/piyushkumar96/app-monitoring/models"
+    prom "github.com/piyushkumar96/app-monitoring/prometheus"
     "github.com/gin-gonic/gin"
     "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-    // Initialize router metrics
-    routerMetrics := monitoring.NewRouterLevelMetrics(&monitoring.RouterMetricsMeta{
+    // Initialize router metrics using Prometheus backend
+    routerMetrics := prom.NewPromRouterMetrics(&models.RouterMetricsMeta{
         Namespace: "myapp",
-        HTTPRequests: &monitoring.MetricMeta{
+        HTTPRequests: &models.MetricMeta{
             Labels: []string{"method", "code", "path", "status"},
         },
-        HTTPRequestsLatencyMillis: &monitoring.MetricMeta{
+        HTTPRequestsLatencyMillis: &models.MetricMeta{
             Labels:  []string{"method", "code", "path"},
-            Buckets: monitoring.GetExponentialBuckets(10, 2, 10),
+            Buckets: prom.GetPromExponentialBuckets(10, 2, 10),
         },
     })
 
@@ -90,20 +88,20 @@ func main() {
 ### 2. Track Database Operations
 
 ```go
-dbMetrics := monitoring.NewDatabaseMetrics(&monitoring.DBMetricsMeta{
+dbMetrics := prom.NewPromDatabaseMetrics(&models.DBMetricsMeta{
     Namespace: "myapp",
-    OperationsTotal: &monitoring.MetricMeta{
+    OperationsTotal: &models.MetricMeta{
         Labels: []string{"op_type", "source", "entity", "is_txn", "status"},
     },
-    OperationsLatencyMillis: &monitoring.MetricMeta{
+    OperationsLatencyMillis: &models.MetricMeta{
         Labels:  []string{"op_type", "source", "entity", "is_txn"},
-        Buckets: monitoring.GetExponentialBuckets(1, 2, 12),
+        Buckets: prom.GetPromExponentialBuckets(1, 2, 12),
     },
 })
 
 // In your repository/handler
 func GetUser(id string) (*User, error) {
-    labelValues := &monitoring.DBMetricsLabelValues{
+    labelValues := &models.DBMetricsLabelValues{
         OpType:   "select",
         Source:   "UserRepository",
         AdEntity: "users",
@@ -121,19 +119,19 @@ func GetUser(id string) (*User, error) {
 ### 3. Track Downstream Service Calls
 
 ```go
-dsMetrics := monitoring.NewDownstreamServiceMetrics(&monitoring.DownstreamServiceMetricsMeta{
+dsMetrics := prom.NewPromDownstreamServiceMetrics(&models.DownstreamServiceMetricsMeta{
     Namespace: "myapp",
-    HTTPRequests: &monitoring.MetricMeta{
+    HTTPRequests: &models.MetricMeta{
         Labels: []string{"service", "method", "code", "api", "status"},
     },
-    HTTPRequestsLatencyMillis: &monitoring.MetricMeta{
+    HTTPRequestsLatencyMillis: &models.MetricMeta{
         Labels:  []string{"service", "method", "code", "api"},
-        Buckets: monitoring.GetExponentialBuckets(10, 2, 10),
+        Buckets: prom.GetPromExponentialBuckets(10, 2, 10),
     },
 })
 
 // Before making HTTP call
-labelValues := &monitoring.DownstreamServiceMetricsLabelValues{
+labelValues := &models.DownstreamServiceMetricsLabelValues{
     Name:          "payment-service",
     HTTPMethod:    "POST",
     APIIdentifier: "/api/v1/payments",
@@ -145,7 +143,7 @@ startTime := time.Now()
 resp, err := http.Post(url, "application/json", body)
 
 // After call completes
-httpMetrics := &monitoring.HTTPMetrics{
+httpMetrics := &models.HTTPMetrics{
     Method:       "POST",
     Code:         resp.StatusCode,
     ResponseTime: time.Since(startTime),
@@ -156,20 +154,20 @@ dsMetrics.LogMetricsPost(resp.StatusCode >= 200 && resp.StatusCode <= 299, label
 ### 4. Track Cron Job Executions
 
 ```go
-cronMetrics := monitoring.NewCronJobMetrics(&monitoring.CronJobMetricsMeta{
+cronMetrics := prom.NewPromCronJobMetrics(&models.CronJobMetricsMeta{
     Namespace: "myapp",
-    JobExecutionTotal: &monitoring.MetricMeta{
+    JobExecutionTotal: &models.MetricMeta{
         Labels: []string{"job_name", "status"},
     },
-    JobExecutionLatencyMillis: &monitoring.MetricMeta{
+    JobExecutionLatencyMillis: &models.MetricMeta{
         Labels:  []string{"job_name"},
-        Buckets: monitoring.GetExponentialBuckets(100, 2, 12),
+        Buckets: prom.GetPromExponentialBuckets(100, 2, 12),
     },
 })
 
 // In your cron job
 func RunCleanupJob() {
-    labelValues := &monitoring.CronJobMetricsLabelValues{
+    labelValues := &models.CronJobMetricsLabelValues{
         JobName: "daily_cleanup",
     }
     
@@ -182,18 +180,18 @@ func RunCleanupJob() {
 ### 5. Track Pub/Sub Operations
 
 ```go
-psMetrics := monitoring.NewPubSubMetrics(&monitoring.PSMetricsMeta{
+psMetrics := prom.NewPromPubSubMetrics(&models.PSMetricsMeta{
     Namespace: "myapp",
-    TotalMessagesConsumed: &monitoring.MetricMeta{
+    TotalMessagesConsumed: &models.MetricMeta{
         Labels: []string{"source", "entity", "op_type", "status", "error_code"},
     },
-    TotalMessagesPublished: &monitoring.MetricMeta{
+    TotalMessagesPublished: &models.MetricMeta{
         Labels: []string{"entity", "op_type", "status"},
     },
 })
 
 // For message consumption
-labelValues := &monitoring.PSMetricsLabelValues{
+labelValues := &models.PSMetricsLabelValues{
     Source:       "orders-subscription",
     Entity:       "order",
     EntityOpType: "create",
@@ -211,9 +209,9 @@ psMetrics.LogMetricsPost(labelValues, nil)
 ### 6. Track Application Errors
 
 ```go
-appMetrics := monitoring.NewAppMetrics(&monitoring.AppMetricsMeta{
+appMetrics := prom.NewPromAppMetrics(&models.AppMetricsMeta{
     Namespace: "myapp",
-    ApplicationErrorsCounter: &monitoring.MetricMeta{
+    ApplicationErrorsCounter: &models.MetricMeta{
         Labels: []string{"error_code"},
     },
 })
@@ -227,49 +225,85 @@ appMetrics.DecrementAppErrorCount("ERR_DB_CONNECTION")
 
 ## Interface-Based Architecture
 
-All metric types are defined as interfaces, enabling:
+All metric types are defined as generic interfaces in the `interfaces` package, enabling:
 - **Easy mocking** for unit tests
 - **Dependency injection** in your application
-- **Swappable implementations** (e.g., NoOp for testing)
+- **Future extensibility** for other metric backends (OpenTelemetry, StatsD, etc.)
 
 ### Using Interfaces
 
 ```go
-// Declare metrics using interfaces
-var (
-    routerMetrics     monitoring.RouterMetricsInterface
-    dbMetrics         monitoring.DBMetricsInterface
-    downstreamMetrics monitoring.DownstreamServiceMetricsInterface
-    cronMetrics       monitoring.CronJobMetricsInterface
-    pubsubMetrics     monitoring.PSMetricsInterface
-    appMetrics        monitoring.AppMetricsInterface
+import (
+    "github.com/piyushkumar96/app-monitoring/interfaces"
+    "github.com/piyushkumar96/app-monitoring/models"
+    prom "github.com/piyushkumar96/app-monitoring/prometheus"
 )
 
-// Initialize with real implementations
-routerMetrics = monitoring.NewRouterLevelMetrics(&monitoring.RouterMetricsMeta{...})
+// Declare metrics using generic interfaces
+var (
+    routerMetrics     interfaces.RouterMetricsInterface
+    dbMetrics         interfaces.DBMetricsInterface
+    downstreamMetrics interfaces.DownstreamServiceMetricsInterface
+    cronMetrics       interfaces.CronJobMetricsInterface
+    pubsubMetrics     interfaces.PSMetricsInterface
+    appMetrics        interfaces.AppMetricsInterface
+)
+
+// Initialize with Prometheus implementations
+routerMetrics = prom.NewPromRouterMetrics(&models.RouterMetricsMeta{...})
 
 // Or use NoOp implementations for testing
-routerMetrics = monitoring.NewNoOpRouterMetrics()
+routerMetrics = prom.NewNoOpPromRouterMetrics()
+
+// Or use Mock implementations for unit testing with assertions
+routerMetrics = interfaces.NewMockRouterMetrics()
 ```
 
-### Available Interfaces
+### Available Interfaces & Implementations
 
-| Interface | Constructor | NoOp Constructor |
-|-----------|-------------|------------------|
-| `RouterMetricsInterface` | `NewRouterLevelMetrics()` | `NewNoOpRouterMetrics()` |
-| `DBMetricsInterface` | `NewDatabaseMetrics()` | `NewNoOpDBMetrics()` |
-| `DownstreamServiceMetricsInterface` | `NewDownstreamServiceMetrics()` | `NewNoOpDownstreamServiceMetrics()` |
-| `CronJobMetricsInterface` | `NewCronJobMetrics()` | `NewNoOpCronJobMetrics()` |
-| `PSMetricsInterface` | `NewPubSubMetrics()` | `NewNoOpPSMetrics()` |
-| `AppMetricsInterface` | `NewAppMetrics()` | `NewNoOpAppMetrics()` |
+| Interface (interfaces pkg) | Prometheus Constructor | NoOp Constructor | Mock Constructor |
+|---------------------------|------------------------|------------------|------------------|
+| `RouterMetricsInterface` | `prom.NewPromRouterMetrics()` | `prom.NewNoOpPromRouterMetrics()` | `interfaces.NewMockRouterMetrics()` |
+| `DBMetricsInterface` | `prom.NewPromDatabaseMetrics()` | `prom.NewNoOpPromDBMetrics()` | `interfaces.NewMockDBMetrics()` |
+| `DownstreamServiceMetricsInterface` | `prom.NewPromDownstreamServiceMetrics()` | `prom.NewNoOpPromDownstreamServiceMetrics()` | `interfaces.NewMockDownstreamServiceMetrics()` |
+| `CronJobMetricsInterface` | `prom.NewPromCronJobMetrics()` | `prom.NewNoOpPromCronJobMetrics()` | `interfaces.NewMockCronJobMetrics()` |
+| `PSMetricsInterface` | `prom.NewPromPubSubMetrics()` | `prom.NewNoOpPromPSMetrics()` | `interfaces.NewMockPSMetrics()` |
+| `AppMetricsInterface` | `prom.NewPromAppMetrics()` | `prom.NewNoOpPromAppMetrics()` | `interfaces.NewMockAppMetrics()` |
 
-### Testing with NoOp Implementations
+### Testing with Mock Implementations
+
+The `interfaces` package provides mock implementations that track method calls for assertions:
 
 ```go
 func TestUserHandler(t *testing.T) {
-    // Use NoOp metrics for testing - no actual Prometheus metrics recorded
-    dbMetrics := monitoring.NewNoOpDBMetrics()
-    appMetrics := monitoring.NewNoOpAppMetrics()
+    // Create mock metrics for testing
+    mockDBMetrics := interfaces.NewMockDBMetrics()
+    mockAppMetrics := interfaces.NewMockAppMetrics()
+    
+    handler := NewUserHandler(mockDBMetrics, mockAppMetrics)
+    
+    // Call the handler
+    handler.GetUser("123")
+    
+    // Assert metrics were logged
+    if !mockDBMetrics.LogMetricsPreCalled {
+        t.Error("Expected LogMetricsPre to be called")
+    }
+    if mockDBMetrics.LogMetricsPreLabelValues.OpType != "select" {
+        t.Error("Expected OpType to be 'select'")
+    }
+}
+```
+
+### Testing with NoOp Implementations
+
+For simpler tests where you don't need to assert on metrics:
+
+```go
+func TestUserHandler(t *testing.T) {
+    // Use NoOp metrics - no actual metrics recorded, no assertions
+    dbMetrics := prom.NewNoOpPromDBMetrics()
+    appMetrics := prom.NewNoOpPromAppMetrics()
     
     handler := NewUserHandler(dbMetrics, appMetrics)
     // ... test your handler
@@ -284,11 +318,11 @@ Each metric type supports customizable labels. The labels you specify in `Metric
 
 ### Histogram Buckets
 
-Use `monitoring.GetExponentialBuckets(start, factor, count)` to generate exponential bucket boundaries:
+Use `prom.GetPromExponentialBuckets(start, factor, count)` to generate exponential bucket boundaries:
 
 ```go
 // Generate buckets: 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120
-buckets := monitoring.GetExponentialBuckets(10, 2, 10)
+buckets := prom.GetPromExponentialBuckets(10, 2, 10)
 ```
 
 ### Disabling Metrics
@@ -296,9 +330,9 @@ buckets := monitoring.GetExponentialBuckets(10, 2, 10)
 Set any metric configuration to `nil` to disable it:
 
 ```go
-routerMetrics := monitoring.NewRouterLevelMetrics(&monitoring.RouterMetricsMeta{
+routerMetrics := prom.NewPromRouterMetrics(&models.RouterMetricsMeta{
     Namespace:                 "myapp",
-    HTTPRequests:              &monitoring.MetricMeta{Labels: []string{"method", "code", "path", "status"}},
+    HTTPRequests:              &models.MetricMeta{Labels: []string{"method", "code", "path", "status"}},
     HTTPRequestsLatencyMillis: nil, // Disabled
     HTTPRequestSizeBytes:      nil, // Disabled
     HTTPResponseSizeBytes:     nil, // Disabled
@@ -316,6 +350,8 @@ See [examples/example.go](examples/example.go) for a complete working example de
 3. **Choose appropriate buckets** - Match bucket ranges to your expected latency distributions
 4. **Limit cardinality** - Avoid high-cardinality labels (e.g., user IDs, request IDs)
 5. **Handle nil metrics** - The package handles nil metric configs gracefully
+6. **Use interfaces** - Declare variables using interfaces for better testability
+7. **Use mocks for assertions** - Use mock implementations when you need to verify metrics are logged correctly
 
 ## License
 

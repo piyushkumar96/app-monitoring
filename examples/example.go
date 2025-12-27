@@ -1,5 +1,5 @@
-// Package main demonstrates how to use the appMnt package for collecting
-// Prometheus metrics in a Go application.
+// Package main demonstrates how to use the app-monitoring package for collecting
+// metrics in a Go application using the Prometheus backend.
 //
 // This example shows:
 //   - Setting up router-level HTTP metrics with Gin middleware
@@ -16,19 +16,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 	ae "github.com/piyushkumar96/app-error"
-	appMnt "github.com/piyushkumar96/app-monitoring"
+	"github.com/piyushkumar96/app-monitoring/interfaces"
+	"github.com/piyushkumar96/app-monitoring/models"
+	prom "github.com/piyushkumar96/app-monitoring/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Global metric instances - typically initialized once at application startup
 // Using interfaces allows for easy mocking in tests and swapping implementations
 var (
-	routerMetrics     appMnt.RouterMetricsInterface
-	dbMetrics         appMnt.DBMetricsInterface
-	downstreamMetrics appMnt.DownstreamServiceMetricsInterface
-	cronMetrics       appMnt.CronJobMetricsInterface
-	pubsubMetrics     appMnt.PSMetricsInterface
-	appMetrics        appMnt.AppMetricsInterface
+	routerMetrics     interfaces.RouterMetricsInterface
+	dbMetrics         interfaces.DBMetricsInterface
+	downstreamMetrics interfaces.DownstreamServiceMetricsInterface
+	cronMetrics       interfaces.CronJobMetricsInterface
+	pubsubMetrics     interfaces.PSMetricsInterface
+	appMetrics        interfaces.AppMetricsInterface
 )
 
 func main() {
@@ -63,22 +65,22 @@ func initializeMetrics() {
 	// Router-Level Metrics (HTTP Endpoint Metrics)
 	// ============================================
 	// These metrics are automatically collected by the middleware
-	routerMetrics = appMnt.NewRouterLevelMetrics(&appMnt.RouterMetricsMeta{
+	routerMetrics = prom.NewPromRouterMetrics(&models.RouterMetricsMeta{
 		Namespace: namespace,
-		HTTPRequests: &appMnt.MetricMeta{
+		HTTPRequests: &models.MetricMeta{
 			Labels: []string{"method", "code", "path", "status"},
 		},
-		HTTPRequestsLatencyMillis: &appMnt.MetricMeta{
+		HTTPRequestsLatencyMillis: &models.MetricMeta{
 			Labels:  []string{"method", "code", "path"},
-			Buckets: appMnt.GetExponentialBuckets(10, 2, 10), // 10ms to ~10s
+			Buckets: prom.GetPromExponentialBuckets(10, 2, 10), // 10ms to ~10s
 		},
-		HTTPRequestSizeBytes: &appMnt.MetricMeta{
+		HTTPRequestSizeBytes: &models.MetricMeta{
 			Labels:  []string{"method", "code", "path"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 10), // 100B to ~100KB
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 10), // 100B to ~100KB
 		},
-		HTTPResponseSizeBytes: &appMnt.MetricMeta{
+		HTTPResponseSizeBytes: &models.MetricMeta{
 			Labels:  []string{"method", "code", "path"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 10),
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 10),
 		},
 	})
 
@@ -86,14 +88,14 @@ func initializeMetrics() {
 	// Database Metrics
 	// ============================================
 	// Track database operations (queries, inserts, updates, deletes)
-	dbMetrics = appMnt.NewDatabaseMetrics(&appMnt.DBMetricsMeta{
+	dbMetrics = prom.NewPromDatabaseMetrics(&models.DBMetricsMeta{
 		Namespace: namespace,
-		OperationsTotal: &appMnt.MetricMeta{
+		OperationsTotal: &models.MetricMeta{
 			Labels: []string{"op_type", "source", "entity", "is_txn", "status"},
 		},
-		OperationsLatencyMillis: &appMnt.MetricMeta{
+		OperationsLatencyMillis: &models.MetricMeta{
 			Labels:  []string{"op_type", "source", "entity", "is_txn"},
-			Buckets: appMnt.GetExponentialBuckets(1, 2, 12), // 1ms to ~4s
+			Buckets: prom.GetPromExponentialBuckets(1, 2, 12), // 1ms to ~4s
 		},
 	})
 
@@ -101,22 +103,22 @@ func initializeMetrics() {
 	// Downstream Service Metrics
 	// ============================================
 	// Track HTTP calls to external/downstream services
-	downstreamMetrics = appMnt.NewDownstreamServiceMetrics(&appMnt.DownstreamServiceMetricsMeta{
+	downstreamMetrics = prom.NewPromDownstreamServiceMetrics(&models.DownstreamServiceMetricsMeta{
 		Namespace: namespace,
-		HTTPRequests: &appMnt.MetricMeta{
+		HTTPRequests: &models.MetricMeta{
 			Labels: []string{"service", "method", "code", "api", "status"},
 		},
-		HTTPRequestsLatencyMillis: &appMnt.MetricMeta{
+		HTTPRequestsLatencyMillis: &models.MetricMeta{
 			Labels:  []string{"service", "method", "code", "api"},
-			Buckets: appMnt.GetExponentialBuckets(10, 2, 10),
+			Buckets: prom.GetPromExponentialBuckets(10, 2, 10),
 		},
-		HTTPRequestSizeBytes: &appMnt.MetricMeta{
+		HTTPRequestSizeBytes: &models.MetricMeta{
 			Labels:  []string{"service", "method", "code", "api"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 10),
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 10),
 		},
-		HTTPResponseSizeBytes: &appMnt.MetricMeta{
+		HTTPResponseSizeBytes: &models.MetricMeta{
 			Labels:  []string{"service", "method", "code", "api"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 10),
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 10),
 		},
 	})
 
@@ -124,14 +126,14 @@ func initializeMetrics() {
 	// Cron Job Metrics
 	// ============================================
 	// Track cron job executions and latencies
-	cronMetrics = appMnt.NewCronJobMetrics(&appMnt.CronJobMetricsMeta{
+	cronMetrics = prom.NewPromCronJobMetrics(&models.CronJobMetricsMeta{
 		Namespace: namespace,
-		JobExecutionTotal: &appMnt.MetricMeta{
+		JobExecutionTotal: &models.MetricMeta{
 			Labels: []string{"job_name", "status"},
 		},
-		JobExecutionLatencyMillis: &appMnt.MetricMeta{
+		JobExecutionLatencyMillis: &models.MetricMeta{
 			Labels:  []string{"job_name"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 12), // 100ms to ~400s
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 12), // 100ms to ~400s
 		},
 	})
 
@@ -139,21 +141,21 @@ func initializeMetrics() {
 	// Pub/Sub Metrics
 	// ============================================
 	// Track message publishing and consumption
-	pubsubMetrics = appMnt.NewPubSubMetrics(&appMnt.PSMetricsMeta{
+	pubsubMetrics = prom.NewPromPubSubMetrics(&models.PSMetricsMeta{
 		Namespace: namespace,
-		TotalMessagesConsumed: &appMnt.MetricMeta{
+		TotalMessagesConsumed: &models.MetricMeta{
 			Labels: []string{"source", "entity", "op_type", "status", "error_code"},
 		},
-		TotalMessagesPublished: &appMnt.MetricMeta{
+		TotalMessagesPublished: &models.MetricMeta{
 			Labels: []string{"entity", "op_type", "status"},
 		},
-		MessagesPublishedLatencyMillis: &appMnt.MetricMeta{
+		MessagesPublishedLatencyMillis: &models.MetricMeta{
 			Labels:  []string{"entity", "op_type"},
-			Buckets: appMnt.GetExponentialBuckets(10, 2, 10),
+			Buckets: prom.GetPromExponentialBuckets(10, 2, 10),
 		},
-		MessagesPublishedSizeBytes: &appMnt.MetricMeta{
+		MessagesPublishedSizeBytes: &models.MetricMeta{
 			Labels:  []string{"entity", "op_type"},
-			Buckets: appMnt.GetExponentialBuckets(100, 2, 12),
+			Buckets: prom.GetPromExponentialBuckets(100, 2, 12),
 		},
 	})
 
@@ -161,9 +163,9 @@ func initializeMetrics() {
 	// Application Error Metrics
 	// ============================================
 	// Track application-level errors by error code
-	appMetrics = appMnt.NewAppMetrics(&appMnt.AppMetricsMeta{
+	appMetrics = prom.NewPromAppMetrics(&models.AppMetricsMeta{
 		Namespace: namespace,
-		ApplicationErrorsCounter: &appMnt.MetricMeta{
+		ApplicationErrorsCounter: &models.MetricMeta{
 			Labels: []string{"error_code"},
 		},
 	})
@@ -172,7 +174,7 @@ func initializeMetrics() {
 // getUsersHandler demonstrates database metrics usage
 func getUsersHandler(c *gin.Context) {
 	// Start database operation tracking
-	labelValues := &appMnt.DBMetricsLabelValues{
+	labelValues := &models.DBMetricsLabelValues{
 		OpType:   "select",
 		Source:   "UserHandler",
 		AdEntity: "users",
@@ -199,7 +201,7 @@ func getUsersHandler(c *gin.Context) {
 // createUserHandler demonstrates downstream service metrics usage
 func createUserHandler(c *gin.Context) {
 	// Track downstream service call to notification service
-	labelValues := &appMnt.DownstreamServiceMetricsLabelValues{
+	labelValues := &models.DownstreamServiceMetricsLabelValues{
 		Name:          "notification-service",
 		HTTPMethod:    "POST",
 		APIIdentifier: "/api/v1/notifications",
@@ -211,7 +213,7 @@ func createUserHandler(c *gin.Context) {
 	resp, err := callNotificationService()
 
 	// Record downstream call metrics
-	httpMetrics := &appMnt.HTTPMetrics{
+	httpMetrics := &models.HTTPMetrics{
 		Method:                "POST",
 		Code:                  resp.StatusCode,
 		RequestBodySizeBytes:  1024,
@@ -234,7 +236,7 @@ func createUserHandler(c *gin.Context) {
 // getOrdersHandler demonstrates pub/sub metrics usage for consumed messages
 func getOrdersHandler(c *gin.Context) {
 	// This would typically be called in a message consumer
-	labelValues := &appMnt.PSMetricsLabelValues{
+	labelValues := &models.PSMetricsLabelValues{
 		Source:       "orders-subscription",
 		Entity:       "order",
 		EntityOpType: "fetch",
@@ -257,7 +259,7 @@ func getOrdersHandler(c *gin.Context) {
 // runDailyCleanupJob demonstrates cron job metrics usage
 // nolint:unused
 func runDailyCleanupJob() {
-	labelValues := &appMnt.CronJobMetricsLabelValues{
+	labelValues := &models.CronJobMetricsLabelValues{
 		JobName: "daily_cleanup",
 	}
 

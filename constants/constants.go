@@ -1,9 +1,8 @@
-// Package app_monitoring provides Prometheus metrics collection utilities for application monitoring.
-// It supports various metric types including counters, gauges, histograms, and summaries
-// for tracking HTTP requests, database operations, cron jobs, pub/sub messaging, and more.
-package app_monitoring
+// Package constants provides shared constants for application monitoring.
+// These constants are used across all metric implementations.
+package constants
 
-// Constants for metric status labels used across all metric types.
+// Constants for metric status labels used across all metric implementations.
 // These are used to categorize metrics into total, success, and failure buckets.
 const (
 	// Total represents the total count label value for metrics.

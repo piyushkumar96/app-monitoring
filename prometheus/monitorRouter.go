@@ -1,15 +1,19 @@
-package app_monitoring
+package prometheus
 
 import (
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/piyushkumar96/app-monitoring/constants"
+	"github.com/piyushkumar96/app-monitoring/interfaces"
+	"github.com/piyushkumar96/app-monitoring/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// NewRouterLevelMetrics creates and registers Prometheus metrics for HTTP router/endpoint level monitoring.
+// NewPromRouterMetrics creates and registers Prometheus metrics for HTTP router/endpoint level monitoring.
 // It initializes counters for request counts and histograms for latencies and payload sizes.
 //
 // The metrics track:
@@ -22,38 +26,38 @@ import (
 //   - meta: Configuration containing the namespace and metric settings.
 //     Set individual metric configs to nil to disable them.
 //
-// Returns a RouterMetricsInterface instance for logging HTTP endpoint metrics.
+// Returns an interfaces.RouterMetricsInterface instance for logging HTTP endpoint metrics.
 //
 // Example:
 //
-//	routerMetrics := monitoring.NewRouterLevelMetrics(&monitoring.RouterMetricsMeta{
+//	routerMetrics := prometheus.NewPromRouterMetrics(&models.RouterMetricsMeta{
 //	    Namespace: "myapp",
-//	    HTTPRequests: &monitoring.MetricMeta{
+//	    HTTPRequests: &models.MetricMeta{
 //	        Labels: []string{"method", "code", "path", "status"},
 //	    },
-//	    HTTPRequestsLatencyMillis: &monitoring.MetricMeta{
+//	    HTTPRequestsLatencyMillis: &models.MetricMeta{
 //	        Labels:  []string{"method", "code", "path"},
-//	        Buckets: monitoring.GetExponentialBuckets(10, 2, 10),
+//	        Buckets: prometheus.GetPromExponentialBuckets(10, 2, 10),
 //	    },
 //	})
-func NewRouterLevelMetrics(meta *RouterMetricsMeta) RouterMetricsInterface {
+func NewPromRouterMetrics(meta *models.RouterMetricsMeta) interfaces.RouterMetricsInterface {
 	var httpRequests *prometheus.CounterVec
 	var httpRequestsLatencyMillis, httpRequestSizeBytes, httpResponseSizeBytes *prometheus.HistogramVec
 
 	if meta.HTTPRequests != nil {
-		httpRequests = GetCounterVec(meta.Namespace, "http_requests", "Tracks the number of HTTP requests at application level", meta.HTTPRequests.Labels)
+		httpRequests = GetPromCounterVec(meta.Namespace, "http_requests", "Tracks the number of HTTP requests at application level", meta.HTTPRequests.Labels)
 	}
 	if meta.HTTPRequestsLatencyMillis != nil {
-		httpRequestsLatencyMillis = GetHistogramVec(meta.Namespace, "http_request_latency_millis", "Tracks the latencies for HTTP requests at application level", meta.HTTPRequestsLatencyMillis.Labels, meta.HTTPRequestsLatencyMillis.Buckets)
+		httpRequestsLatencyMillis = GetPromHistogramVec(meta.Namespace, "http_request_latency_millis", "Tracks the latencies for HTTP requests at application level", meta.HTTPRequestsLatencyMillis.Labels, meta.HTTPRequestsLatencyMillis.Buckets)
 	}
 	if meta.HTTPRequestSizeBytes != nil {
-		httpRequestSizeBytes = GetHistogramVec(meta.Namespace, "http_request_size_bytes", "Tracks the size of HTTP requests at application level.", meta.HTTPRequestSizeBytes.Labels, meta.HTTPRequestSizeBytes.Buckets)
+		httpRequestSizeBytes = GetPromHistogramVec(meta.Namespace, "http_request_size_bytes", "Tracks the size of HTTP requests at application level.", meta.HTTPRequestSizeBytes.Labels, meta.HTTPRequestSizeBytes.Buckets)
 	}
 	if meta.HTTPResponseSizeBytes != nil {
-		httpResponseSizeBytes = GetHistogramVec(meta.Namespace, "http_response_size_bytes", "Tracks the size of HTTP responses at application level", meta.HTTPResponseSizeBytes.Labels, meta.HTTPResponseSizeBytes.Buckets)
+		httpResponseSizeBytes = GetPromHistogramVec(meta.Namespace, "http_response_size_bytes", "Tracks the size of HTTP responses at application level", meta.HTTPResponseSizeBytes.Labels, meta.HTTPResponseSizeBytes.Buckets)
 	}
 
-	return &RouterMetrics{
+	return &PromRouterMetrics{
 		httpRequests:              httpRequests,
 		httpRequestsLatencyMillis: httpRequestsLatencyMillis,
 		httpRequestSizeBytes:      httpRequestSizeBytes,
@@ -79,9 +83,9 @@ func NewRouterLevelMetrics(meta *RouterMetricsMeta) RouterMetricsInterface {
 // Example:
 //
 //	router := gin.Default()
-//	routerMetrics := monitoring.NewRouterLevelMetrics(meta)
+//	routerMetrics := prometheus.NewPromRouterMetrics(meta)
 //	router.Use(routerMetrics.LogMetrics("/metrics"))
-func (rlm *RouterMetrics) LogMetrics(metricsPath string) gin.HandlerFunc {
+func (rlm *PromRouterMetrics) LogMetrics(metricsPath string) gin.HandlerFunc {
 	return func(gc *gin.Context) {
 		// Skip metrics collection for the metrics endpoint itself
 		if gc.Request.URL.Path == metricsPath {
@@ -95,7 +99,7 @@ func (rlm *RouterMetrics) LogMetrics(metricsPath string) gin.HandlerFunc {
 
 		if rlm.httpRequests != nil {
 			// Increment total request counter before processing
-			rlm.httpRequests.WithLabelValues(gc.Request.Method, "", urlPath, Total).Inc()
+			rlm.httpRequests.WithLabelValues(gc.Request.Method, "", urlPath, constants.Total).Inc()
 		}
 
 		// Pass request to the next handler in chain
@@ -114,10 +118,10 @@ func (rlm *RouterMetrics) LogMetrics(metricsPath string) gin.HandlerFunc {
 
 		// Record success/failure based on HTTP status code
 		if rlm.httpRequests != nil {
-			if httpCodeInt >= HTTPStatus2XXMinValue && httpCodeInt <= HTTPStatus2XXMaxValue {
-				rlm.httpRequests.WithLabelValues(gc.Request.Method, httpCode, urlPath, Success).Inc()
+			if httpCodeInt >= constants.HTTPStatus2XXMinValue && httpCodeInt <= constants.HTTPStatus2XXMaxValue {
+				rlm.httpRequests.WithLabelValues(gc.Request.Method, httpCode, urlPath, constants.Success).Inc()
 			} else {
-				rlm.httpRequests.WithLabelValues(gc.Request.Method, httpCode, urlPath, Failure).Inc()
+				rlm.httpRequests.WithLabelValues(gc.Request.Method, httpCode, urlPath, constants.Failure).Inc()
 			}
 		}
 
@@ -164,7 +168,7 @@ func computeApproximateRequestSize(r *http.Request) int {
 // for the HTTP requests counter. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (rlm *RouterMetrics) GetHTTPRequestsMetric() *prometheus.CounterVec {
+func (rlm *PromRouterMetrics) GetHTTPRequestsMetric() *prometheus.CounterVec {
 	return rlm.httpRequests
 }
 
@@ -172,7 +176,7 @@ func (rlm *RouterMetrics) GetHTTPRequestsMetric() *prometheus.CounterVec {
 // for the HTTP request latency. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (rlm *RouterMetrics) GetHTTPRequestsLatencyMillisMetric() *prometheus.HistogramVec {
+func (rlm *PromRouterMetrics) GetHTTPRequestsLatencyMillisMetric() *prometheus.HistogramVec {
 	return rlm.httpRequestsLatencyMillis
 }
 
@@ -180,7 +184,7 @@ func (rlm *RouterMetrics) GetHTTPRequestsLatencyMillisMetric() *prometheus.Histo
 // for the HTTP request size. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (rlm *RouterMetrics) GetHTTPRequestSizeBytesMetric() *prometheus.HistogramVec {
+func (rlm *PromRouterMetrics) GetHTTPRequestSizeBytesMetric() *prometheus.HistogramVec {
 	return rlm.httpRequestSizeBytes
 }
 
@@ -188,6 +192,6 @@ func (rlm *RouterMetrics) GetHTTPRequestSizeBytesMetric() *prometheus.HistogramV
 // for the HTTP response size. This can be used for advanced operations.
 //
 // Returns nil if the metric was not configured during initialization.
-func (rlm *RouterMetrics) GetHTTPResponseSizeBytesMetric() *prometheus.HistogramVec {
+func (rlm *PromRouterMetrics) GetHTTPResponseSizeBytesMetric() *prometheus.HistogramVec {
 	return rlm.httpResponseSizeBytes
 }
